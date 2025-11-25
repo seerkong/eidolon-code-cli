@@ -1,0 +1,28 @@
+<type_def lang="typescript" #>
+
+export interface EditTextOuterInput {
+    path: string;
+    action: "insert" | "replace" | "delete_range";
+    insertAfter?: number;
+    newText?: string;
+    find?: string;
+    replace?: string;
+    range?: [number, number];
+}
+export type EditTextOuterOutput = string;
+export type edit_text = (input: EditTextOuterInput) => EditTextOuterOutput;
+
+<#>
+
+<demo #good_usage_demo1>
+!unquote_start
+<tool_call id="edit_demo" lang="javascript" #>
+SysBuiltIn.edit_text({
+    path: "README.md",
+    action: "insert",
+    insertAfter: 5,
+    newText: "Added a new note.\n"
+})
+<#>
+!unquote_end
+<#good_usage_demo1>

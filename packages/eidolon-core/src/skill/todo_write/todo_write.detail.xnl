@@ -1,0 +1,26 @@
+<type_def lang="typescript" #>
+
+export interface TodoWriteOuterInput {
+    items: {
+        id?: string;
+        content: string;
+        status: "pending" | "in_progress" | "completed";
+        activeForm: string;
+    }[];
+}
+export type TodoWriteOuterOutput = string;
+export type todo_write = (input: TodoWriteOuterInput) => TodoWriteOuterOutput;
+
+<#>
+
+<demo #good_usage_demo1>
+!unquote_start
+<tool_call id="todo-demo" lang="javascript" #>
+SysBuiltIn.todo_write({
+    items: [
+        { id: "1", content: "Add README", status: "in_progress", activeForm: "cli" }
+    ]
+})
+<#>
+!unquote_end
+<#good_usage_demo1>

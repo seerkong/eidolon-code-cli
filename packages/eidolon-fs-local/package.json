@@ -1,0 +1,13 @@
+{
+  "name": "@eidolon/fs-local",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@eidolon/fs-api": "workspace:*"
+  },
+  "license": "MIT"
+}

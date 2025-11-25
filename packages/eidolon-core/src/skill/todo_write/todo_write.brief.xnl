@@ -1,0 +1,5 @@
+<tool {
+  name = "todo_write"
+  namespace = "SysBuiltIn"
+  description = "Update shared todo list items and stats."
+}>

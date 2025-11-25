@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid"
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../eidolon-core" },
+    { "path": "../eidolon-fs-local" },
+    { "path": "../eidolon-fs-api" }
+  ]
+}

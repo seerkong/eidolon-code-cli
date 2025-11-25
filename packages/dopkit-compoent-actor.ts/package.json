@@ -1,0 +1,40 @@
+{
+  "name": "dopkit-compoent-actor.ts",
+  "version": "0.3.0",
+  "description": "TypeScript implementation of DOPKit - Component Actor Framework with message dispatch engine",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "dopkit",
+    "component",
+    "actor",
+    "dispatch",
+    "router",
+    "framework",
+    "data-oriented-programming"
+  ],
+  "author": "kongweixian",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jest": "^29.5.11",
+    "@types/node": "^20.10.6",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

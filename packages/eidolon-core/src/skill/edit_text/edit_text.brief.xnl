@@ -1,0 +1,5 @@
+<tool {
+  name = "edit_text"
+  namespace = "SysBuiltIn"
+  description = "Apply insert/replace/delete_range edits to a text file."
+}>

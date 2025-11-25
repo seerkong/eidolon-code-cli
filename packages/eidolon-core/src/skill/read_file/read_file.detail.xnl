@@ -1,0 +1,24 @@
+<type_def lang="typescript" #>
+
+export interface ReadFileOuterInput {
+    path: string;        // required
+    startLine?: number;  // optional, 1-based inclusive
+    endLine?: number;    // optional, inclusive (-1 for end)
+    maxBytes?: number;   // optional, clamp output bytes
+}
+export type ReadFileOuterOutput = string;
+export type read_file = (input: ReadFileOuterInput) => ReadFileOuterOutput;
+
+<#>
+
+<demo #good_usage_demo1>
+!unquote_start
+<tool_call id="read-demo" lang="javascript" #>
+SysBuiltIn.read_file({
+    path: "README.md",
+    startLine: 1,
+    endLine: 40
+})
+<#>
+!unquote_end
+<#good_usage_demo1>

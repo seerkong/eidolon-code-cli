@@ -1,0 +1,5 @@
+<tool {
+  name = "read_file"
+  namespace = "SysBuiltIn"
+  description = "Read a UTF-8 text file with optional line/byte limits."
+}>

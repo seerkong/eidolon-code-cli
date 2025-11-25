@@ -1,0 +1,34 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/eidolon-fs-api/tsconfig.json" },
+    { "path": "./packages/eidolon-fs-local/tsconfig.json" },
+    { "path": "./packages/eidolon-core/tsconfig.json" },
+    { "path": "./packages/eidolon-cli/tsconfig.json" },
+    { "path": "./packages/xnl.ts/tsconfig.json" }
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": false,
+    "emitDeclarationOnly": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "dopkit-compoent-actor.ts": ["packages/dopkit-compoent-actor.ts/src/index.ts"],
+      "@eidolon/fs-api": ["packages/eidolon-fs-api/src/index.ts"],
+      "@eidolon/core": ["packages/eidolon-core/src/index.ts"],
+      "@eidolon/fs-local": ["packages/eidolon-fs-local/src/index.ts"],
+      "xnl.ts": ["packages/xnl.ts/src/index.ts"]
+    },
+    "target": "es2020",
+    "lib": ["es2020"],
+    "strict": true,
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "types": ["bun-types"],
+    "allowImportingTsExtensions": true
+  }
+}

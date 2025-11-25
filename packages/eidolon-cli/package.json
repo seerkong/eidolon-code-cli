@@ -1,0 +1,21 @@
+{
+  "name": "@eidolon/cli",
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "eidolon": "./src/index.tsx"
+  },
+  "main": "./src/index.tsx",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "@eidolon/core": "workspace:*",
+    "@eidolon/fs-local": "workspace:*",
+    "@eidolon/fs-api": "workspace:*",
+    "@opentui/core": "^0.1.50",
+    "@opentui/solid": "^0.1.50",
+    "solid-js": "^1.9.10"
+  },
+  "license": "MIT"
+}

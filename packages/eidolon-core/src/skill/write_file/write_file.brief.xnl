@@ -1,0 +1,5 @@
+<tool {
+  name = "write_file"
+  namespace = "SysBuiltIn"
+  description = "Write or append UTF-8 text to a file."
+}>

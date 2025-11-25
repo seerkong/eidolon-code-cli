@@ -1,0 +1,23 @@
+<type_def lang="typescript" #>
+
+export interface WriteFileOuterInput {
+    path: string;           // required
+    content: string;        // required
+    mode?: "overwrite" | "append"; // default overwrite
+}
+export type WriteFileOuterOutput = string;
+export type write_file = (input: WriteFileOuterInput) => WriteFileOuterOutput;
+
+<#>
+
+<demo #good_usage_demo1>
+!unquote_start
+<tool_call id="write-demo" lang="javascript" #>
+SysBuiltIn.write_file({
+    path: "notes.txt",
+    content: "hello world\n",
+    mode: "append"
+})
+<#>
+!unquote_end
+<#good_usage_demo1>

@@ -1,0 +1,5 @@
+<tool {
+  namespace = "SysBuiltIn"
+  name = "bash"
+  description = "Execute a shell command inside the project workspace."
+}>
