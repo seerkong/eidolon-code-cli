@@ -12,7 +12,7 @@ export interface BashOuterInput {
 export type BashOuterOutput = string;
 export type bash = (input: BashOuterInput) => BashOuterOutput;
 
-<#>
+</#>
 
 <demo #good_usage_demo1>
 !unquote_start
@@ -20,9 +20,9 @@ export type bash = (input: BashOuterInput) => BashOuterOutput;
 SysBuiltIn.bash({
     command: "ls -al"
 })
-<#>
+</#>
 !unquote_end
-<#good_usage_demo1>
+</#good_usage_demo1>
 
 <demo #good_usage_demo2>
 !unquote_start
@@ -31,9 +31,9 @@ SysBuiltIn.bash({
     command: "ls -al",
     timeoutMs: 2000
 })
-<#>
+</#>
 !unquote_end
-<#good_usage_demo2>
+</#good_usage_demo2>
 
 <demo #bad_usage_demo1>
 !unquote_start
@@ -41,18 +41,18 @@ SysBuiltIn.bash({
 SysBuiltIn.bash_abc({
     command222: "ls -al"
 })
-<#>
+</#>
 !unquote_end
-<#bad_usage_demo1>
+</#bad_usage_demo1>
 
 <demo #bad_usage_demo2>
 !unquote_start
 <tool_call id="abcd" lang="javascript" #>
 SysBuiltIn.bash("ls -al")
-<#>
+</#>
 !unquote_end
-<#bad_usage_demo2>
+</#bad_usage_demo2>
 
 <warning #>
 你不允许使用bash命令，执行危险操作
-<#>
+</#>

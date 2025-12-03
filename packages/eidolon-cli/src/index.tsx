@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { render, useTerminalDimensions } from "@opentui/solid";
+import { render, useRenderer, useTerminalDimensions } from "@opentui/solid";
 import type { KeyEvent, SelectOption, TextareaRenderable } from "@opentui/core";
 import { createEffect, createMemo, createSignal, For, Show, onCleanup } from "solid-js";
 import { appendFile, mkdir, readdir } from "fs/promises";
@@ -10,7 +10,6 @@ import {
   AgentRunner,
   FileStoreActorImpl,
   createLLMClient,
-  parseXnlToolCalls,
   StubLLMClientActor,
   EidolonCoreRuntime,
   EidolonConfig,
@@ -34,6 +33,8 @@ import {
   SlashCommand,
   SlashCommandLists,
 } from "./slashCommands";
+import type { TokenUsage } from "@eidolon/core";
+import { appendTrailingSpace, prepareInsertCommandSubmission } from "./insertCommandHelpers";
 import { FileSystemApi, deriveProjectId } from "@eidolon/fs-api";
 
 type FileOption = SelectOption & { path: string };
@@ -62,7 +63,7 @@ async function createSessionLogger(workspace: string): Promise<SessionLogger> {
   const projectId = deriveProjectId(workspace);
   const sessionId = new Date().toISOString().replace(/[:.]/g, "-");
   const logDir = path.join(os.homedir(), ".eidolon", "projects", projectId, "sessions", sessionId);
-  const logFile = path.join(logDir, "app.log");
+  const logFile = path.join(logDir, "cli.log");
   await mkdir(logDir, { recursive: true });
   const log = async (line: string) => {
     try {
@@ -129,45 +130,6 @@ function stripToolcallBlocks(text: string): string {
   return text.replace(/!unquote_start[\s\S]*?!unquote_end/gi, "").trim();
 }
 
-function filterStreamChunk(state: StreamFilterState, chunk: string): { visible: string; triggers: string[] } {
-  let rest = chunk;
-  let visible = "";
-  const triggers: string[] = [];
-
-
-  while (rest.length > 0) {
-    if (state.inUnquote) {
-      const endIdx = rest.indexOf(UnquoteEndMark);
-      if (endIdx === -1) {
-        state.hidden += rest;
-        rest = "";
-      } else {
-        state.hidden += rest.slice(0, endIdx);
-        const parsed = parseXnlToolCalls(state.hidden);
-        for (const call of parsed) {
-          triggers.push(`# trigger tool call: ${guessRouteFromCode(call.code ?? "")}`);
-        }
-        state.hidden = "";
-        state.inUnquote = false;
-        rest = rest.slice(endIdx + UnquoteEndMark.length);
-      }
-    } else {
-      const startIdx = rest.indexOf(UnquoteStartMark);
-      if (startIdx === -1) {
-        visible += rest;
-        rest = "";
-      } else {
-        visible += rest.slice(0, startIdx);
-        state.inUnquote = true;
-        state.hidden = "";
-        rest = rest.slice(startIdx + UnquoteStartMark.length);
-      }
-    }
-  }
-
-  return { visible, triggers };
-}
-
 function readWorkingDirectory(workspace: string): FileOption[] {
   try {
     return fsSync
@@ -214,7 +176,7 @@ type AppProps = {
   stateStore: FileStoreActorImpl;
   initialSlashLists: SlashCommandLists;
   loadSlashLists: () => Promise<SlashCommandLists>;
-  configInfo: { provider?: string; apiKind?: string; hasApiKey: boolean };
+  configInfo: { provider?: string; apiKind?: string; hasApiKey: boolean; maxInputChars?: number };
 };
 
 const App = (props: AppProps) => {
@@ -233,16 +195,21 @@ const App = (props: AppProps) => {
   const [completionOptions, setCompletionOptions] = createSignal<string[]>([]);
   const [completionKind, setCompletionKind] = createSignal<CompletionContext>(null);
   const [completionHidden, setCompletionHidden] = createSignal(false);
+  const [pendingInsertSlash, setPendingInsertSlash] = createSignal<SlashCommand | null>(null);
   const [suppressedCompletionStart, setSuppressedCompletionStart] = createSignal<number | null>(null);
   const [isRunning, setIsRunning] = createSignal(false);
   const [activeAgentName, setActiveAgentName] = createSignal<string | undefined>(undefined);
   const [slashMenuOpen, setSlashMenuOpen] = createSignal(false);
+  const [tokenStats, setTokenStats] = createSignal<TokenUsage>({ promptTokens: 0, completionTokens: 0, totalTokens: 0 });
+  const [lastTurnUsage, setLastTurnUsage] = createSignal<TokenUsage | undefined>(undefined);
   let suppressNextSubmit = false;
   let swallowNextKey = false;
   let suppressSlashAutoOpen = false;
   let lastSlashActive = false;
 
   let promptRef: TextareaRenderable | undefined;
+  let historyScrollRef: any;
+  const renderer = useRenderer();
   const terminal = useTerminalDimensions();
   const appendHistory = (entry: NoIdCliHistoryEntry) => {
     let hasIdHistory = fillCliHistoryId(entry);
@@ -264,24 +231,7 @@ const App = (props: AppProps) => {
       fileStore: props.stateStore,
       llmClient: props.llm
     },
-    {
-      appLogger: (line: string) => props.logger.log(line),
-      toolCallbacks: {
-        // onStart: async (call: CliHistoryEntry) => {
-        //   await props.logger.log(`[toolCallbacks] onStart: ${JSON.stringify(call)}`);
-  
-        //   const id = appendHasIdHistory(call);
-        //   return id;
-        // },
-        // onResult: async (result: CliHistoryEntry) => {
-        //   await props.logger.log(`[toolCallbacks] onResult: ${JSON.stringify(result)}`);
-  
-        //   appendHasIdHistory(result);
-        // },
-
-      },
-    },
-    {}
+    {}, {}
   );
   const runner = new AgentRunner(agentRuntime);
 
@@ -371,7 +321,7 @@ const App = (props: AppProps) => {
     buildSuggestion(inputValue(), completionKind(), completionOptions(), selectedCompletionIndex())
   );
 
-  const slashActive = createMemo(() => inputValue().trimStart().startsWith("/"));
+  const slashActive = createMemo(() => !pendingInsertSlash() && inputValue().trimStart().startsWith("/"));
 
   createEffect(() => {
     const active = slashActive();
@@ -436,6 +386,36 @@ const App = (props: AppProps) => {
     normalizePromptScrollDelayed();
   });
 
+  // Ensure mouse wheel scrolling always works on the history panel.
+  createEffect(() => {
+    const handler = (event: any) => {
+      if (event?.type !== "scroll") return;
+      const box = historyScrollRef;
+      if (!box) return;
+      const { x, y, width, height } = box;
+      const inside =
+        typeof event.x === "number" &&
+        typeof event.y === "number" &&
+        event.x >= x &&
+        event.x < x + width &&
+        event.y >= y &&
+        event.y < y + height;
+      if (!inside) return;
+      const dir = event.scroll?.direction;
+      const delta = event.scroll?.delta ?? 1;
+      const step = dir === "up" ? -delta : dir === "down" ? delta : 0;
+      if (!step) return;
+      const maxScroll = Math.max(0, (box.scrollHeight ?? 0) - (box.viewport?.height ?? 0));
+      const next = Math.max(0, Math.min(maxScroll, (box.scrollTop ?? 0) + step));
+      if (next !== box.scrollTop) {
+        box.scrollTop = next;
+        box.requestRender?.();
+      }
+    };
+    renderer.on("mouse", handler);
+    onCleanup(() => renderer.off("mouse", handler));
+  });
+
   const paletteEntries = createMemo(() => [
     ...slashLists().execute.map((cmd) => ({ mode: "execute" as const, cmd })),
     ...slashLists().insert.map((cmd) => ({ mode: "insert" as const, cmd })),
@@ -469,12 +449,20 @@ const App = (props: AppProps) => {
 
   const selectedSlash = createMemo(() => filteredPaletteEntries()[slashIndex()] ?? null);
 
+  const usagePercent = createMemo(() => {
+    const maxChars = props.configInfo.maxInputChars || 0;
+    if (!maxChars) return null;
+    const total = tokenStats().totalTokens || 0;
+    return Math.min(100, Math.round((total / maxChars) * 100));
+  });
+
   const statusLineText = createMemo(() => {
     const agentLabel = activeAgentName() ? `agent: ${activeAgentName()}` : "agent: default";
     const modelLabel = props.configInfo.provider
       ? `model: ${props.configInfo.provider}/${props.configInfo.apiKind || "openai"}`
       : "model: stub";
-    return `workspace: ${props.workspace} • ${agentLabel} • ${modelLabel}`;
+    const usageLabel = usagePercent() !== null ? `usage: ${usagePercent()}%` : "usage: n/a";
+    return `workspace: ${props.workspace} • ${agentLabel} • ${modelLabel} • ${usageLabel}`;
   });
 
   const shortcutLineText = createMemo(
@@ -513,8 +501,8 @@ const App = (props: AppProps) => {
     if (!selection) return;
     if (selection.mode === "insert") {
       const base = selection.cmd.name;
-      const spacer = inputValue() && !inputValue().endsWith(" ") ? " " : "";
-      setPromptValue(`${base}${spacer}`, true);
+      setPendingInsertSlash(selection.cmd);
+      setPromptValue(appendTrailingSpace(base), true);
       setSlashMenuOpen(false);
       suppressSlashAutoOpen = true;
       return;
@@ -538,7 +526,28 @@ const App = (props: AppProps) => {
     }
   });
 
-  const submitCommand = (value: string) => {
+  createEffect(() => {
+    const pending = pendingInsertSlash();
+    if (!pending) return;
+    const val = inputValue();
+    if (!val.startsWith(pending.name)) {
+      setPendingInsertSlash(null);
+    }
+  });
+
+  const runInsertCommand = async (cmd: SlashCommand, rawInput: string) => {
+    const content = await loadSlashCommandContent(cmd);
+    const { userInput, extraSystems } = prepareInsertCommandSubmission(rawInput, cmd, content);
+    setPendingInsertSlash(null);
+    setSlashMenuOpen(false);
+    suppressSlashAutoOpen = true;
+    await runChat(userInput, {
+      fromSlash: cmd.name,
+      prependSystems: extraSystems.length ? extraSystems : undefined,
+    });
+  };
+
+  const submitCommand = async (value: string) => {
     if (suppressNextSubmit) {
       suppressNextSubmit = false;
       return;
@@ -546,14 +555,31 @@ const App = (props: AppProps) => {
     if (isRunning()) return;
     const trimmed = value.trim();
     if (!trimmed) return;
+
+    const pending = pendingInsertSlash();
+    if (pending) {
+      await runInsertCommand(pending, trimmed);
+      return;
+    }
+
+    const firstToken = trimmed.startsWith("/") ? trimmed.split(/\s+/)[0] : null;
+    const directInsert = firstToken
+      ? slashLists().insert.find((c) => c.name === firstToken)
+      : null;
+    if (directInsert) {
+      await runInsertCommand(directInsert, trimmed);
+      return;
+    }
+
     if (slashActive()) {
       const selection = selectedSlash();
       if (selection) {
         if (selection.mode === "insert") {
           const base = selection.cmd.name;
-          const rest = trimmed.slice(1);
-          const spacer = inputValue() && !inputValue().endsWith(" ") ? " " : "";
-          setPromptValue(`${base}${spacer}${rest ? rest : ""}`, true);
+          const rest = trimmed.slice(base.length).trimStart();
+          const combined = rest ? `${base} ${rest}` : base;
+          setPendingInsertSlash(selection.cmd);
+          setPromptValue(appendTrailingSpace(combined), true);
           setSlashMenuOpen(false);
           suppressSlashAutoOpen = true;
           return;
@@ -566,16 +592,8 @@ const App = (props: AppProps) => {
     }
 
     if (trimmed.startsWith("/")) {
-      const first = trimmed.split(/\s+/)[0];
       const found =
         slashLists().execute.find((c) => c.name === first) || slashLists().insert.find((c) => c.name === first);
-      if (found && found.mode === "insert") {
-        const spacer = trimmed.endsWith(" ") ? "" : " ";
-        setPromptValue(`${found.name}${spacer}`, true);
-        setSlashMenuOpen(false);
-        suppressSlashAutoOpen = true;
-        return;
-      }
       if (found) {
         void runSlash(found, trimmed.slice(first.length).trim());
         setSlashMenuOpen(false);
@@ -699,7 +717,7 @@ const App = (props: AppProps) => {
         normalizePromptScrollDelayed();
         return;
       }
-      if (slashActive()) {
+      if (slashMenuOpen() && slashActive()) {
         void acceptSlashCommand();
         return;
       }
@@ -707,7 +725,7 @@ const App = (props: AppProps) => {
         acceptSuggestion();
         return;
       }
-      submitCommand(inputValue());
+      void submitCommand(inputValue());
       normalizePromptScrollDelayed();
       return;
     }
@@ -815,7 +833,7 @@ const App = (props: AppProps) => {
     await runChat(merged, { fromSlash: cmd.name });
   };
 
-  const runChat = async (input: string, meta?: { fromSlash?: string }) => {
+  const runChat = async (input: string, meta?: { fromSlash?: string; prependSystems?: string[] }) => {
     if (isRunning()) return;
     setIsRunning(true);
     setPromptValue("");
@@ -836,7 +854,7 @@ const App = (props: AppProps) => {
     }
 
     try {
-      const extraSystems: string[] = [];
+      const extraSystems: string[] = meta?.prependSystems ? [...meta.prependSystems] : [];
       if (agent?.systemPrompt) {
         extraSystems.push(agent.systemPrompt);
       }
@@ -860,7 +878,7 @@ const App = (props: AppProps) => {
       const result = await runner.kick(
         processedInput,
         {
-          onToken: (msgId: string, chunk) => {
+          onChunk: (msgId: string, chunk) => {
             if (!chunk) return;
             if (lastMsgId !== msgId) {
               // init
@@ -877,7 +895,9 @@ const App = (props: AppProps) => {
             let isStateSwitch = (assistantVisible != newVisibleState)
             assistantVisible = newVisibleState;
 
-            if (assistantVisible) {
+            // let stripToolCallLogToCli = true;
+            let stripToolCallLogToCli = false;
+            if (stripToolCallLogToCli && assistantVisible) {
               let activeCliEntry = history().find((h) => h.id === assistantId);
               
               if (isStateSwitch) {
@@ -891,13 +911,14 @@ const App = (props: AppProps) => {
                 let noToolcallBlocksContent = stripToolcallBlocks(historyContent)
                 updateHistory(assistantId, noToolcallBlocksContent);
               }
+            } else {
+              // 调试，显示raw xnl toolcall协议
+              let activeCliEntry = history().find((h) => h.id === assistantId);
+              if (activeCliEntry) {
+                let current = activeCliEntry?.text || "";
+                updateHistory(assistantId, `${current}${chunk}`);
+              }
             }
-
-            // let activeCliEntry = history().find((h) => h.id === assistantId);
-            // if (activeCliEntry) {
-            //   let current = activeCliEntry?.text || "";
-            //   updateHistory(assistantId, `${current}${chunk}`);
-            // }
           },
           onDone: () => undefined,
 
@@ -926,6 +947,18 @@ const App = (props: AppProps) => {
       await props.logger.log(
         `assistant summary textLen=${result.assistantText.trim().length} tools=${result.toolResults.length}`
       );
+      if (result.tokenStats) {
+        setTokenStats(result.tokenStats);
+      }
+      if (result.usage) {
+        setLastTurnUsage(result.usage);
+        const p = result.usage.promptTokens ?? 0;
+        const c = result.usage.completionTokens ?? 0;
+        const t = result.usage.totalTokens ?? p + c;
+        const sessionTotal = result.tokenStats?.totalTokens ?? t;
+        appendHistory({ role: "info", text: `tokens prompt=${p} completion=${c} total=${t} session=${sessionTotal}` });
+        await props.logger.log(`token usage prompt=${p} completion=${c} total=${t} sessionTotal=${sessionTotal}`);
+      }
       if (result.todos.items.length) {
         const stats = result.todos.stats;
         appendHistory({
@@ -979,6 +1012,7 @@ const App = (props: AppProps) => {
       <box flexDirection="column" flexGrow={1} position="relative" gap={0} paddingLeft={1} paddingRight={1}>
         <Show when={layoutHeights().historyH > 0}>
           <scrollbox
+            ref={(el) => (historyScrollRef = el)}
             height={layoutHeights().historyH}
             padding={0}
             stickyScroll
@@ -1200,9 +1234,12 @@ async function main() {
       stateStore={stateStore}
       initialSlashLists={initialSlashLists}
       loadSlashLists={() => loadSlashCommandLists(workspace)}
-      configInfo={{ provider: activeModel.provider, apiKind: activeModel.apiKind, hasApiKey }}
+      configInfo={{ provider: activeModel.provider, apiKind: activeModel.apiKind, hasApiKey, maxInputChars: activeModel.maxInputChars }}
     />
-  ));
+  ), {
+    useMouse: true,
+    enableMouseMovement: true,
+  });
 }
 
 main().catch((error) => {

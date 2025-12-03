@@ -1,15 +1,16 @@
 import crypto from "crypto";
 import {
+  AgentRunnerOuterCtrl,
   ulid,
   type ChatMessage,
   type LLMClientActor,
   type LLMResponse,
   type Logger,
   type ModelProfile,
-  type StreamCallbacks,
   type ToolCall,
   type ToolDefinition,
 } from "../index";
+import { estimateCompletionTokens, estimatePromptTokens, mergeUsage } from "./usage";
 
 type AnthropicContent =
   | { type: "text"; text: string }
@@ -42,7 +43,7 @@ export class AnthropicAdapter implements LLMClientActor {
     }
   }
 
-  async respond(messages: ChatMessage[], tools: ToolDefinition[], callbacks?: StreamCallbacks): Promise<LLMResponse> {
+  async respond(messages: ChatMessage[], tools: ToolDefinition[], callbacks?: AgentRunnerOuterCtrl): Promise<LLMResponse> {
     if (!this.profile.apiKey) {
       return { text: "No API key provided", toolCalls: [] };
     }
@@ -86,7 +87,7 @@ export class AnthropicAdapter implements LLMClientActor {
     }
 
     if (body.stream && res.body) {
-      return this.handleStream(res, callbacks);
+      return this.handleStream(res, callbacks, messages);
     }
 
     const data: any = await res.json();
@@ -108,8 +109,8 @@ export class AnthropicAdapter implements LLMClientActor {
     }
     let msgId = ulid();
 
-    if (text && callbacks?.onToken) {
-      callbacks.onToken(msgId, text);
+    if (text && callbacks?.onChunk) {
+      callbacks.onChunk(msgId, text);
       callbacks.onDone?.();
     }
 
@@ -122,10 +123,23 @@ export class AnthropicAdapter implements LLMClientActor {
             2
           );
 
-    return { text, toolCalls, rawToolCallsStr };
+    const usage = mergeUsage(
+      undefined,
+      {
+        promptTokens: estimatePromptTokens(messages),
+        completionTokens: estimateCompletionTokens(text),
+        totalTokens: undefined,
+      }
+    );
+
+    return { text, toolCalls, rawToolCallsStr, usage };
   }
 
-  private async handleStream(res: Response, callbacks?: StreamCallbacks): Promise<LLMResponse> {
+  private async handleStream(
+    res: Response,
+    callbacks: AgentRunnerOuterCtrl | undefined,
+    messages: ChatMessage[]
+  ): Promise<LLMResponse> {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -168,7 +182,7 @@ export class AnthropicAdapter implements LLMClientActor {
             if (chunk) {
               gotStreamData = true;
               text += chunk;
-              callbacks?.onToken?.(msgId, chunk);
+              callbacks?.onChunk?.(msgId, chunk);
               state.text = (state.text || "") + chunk;
             }
           } else if (delta.type === "input_json_delta" && state.type === "tool_use") {
@@ -181,7 +195,7 @@ export class AnthropicAdapter implements LLMClientActor {
             const chunk = delta.text;
             gotStreamData = true;
             text += chunk;
-            callbacks?.onToken?.(msgId, chunk);
+            callbacks?.onChunk?.(msgId, chunk);
             state.text = (state.text || "") + chunk;
           }
           break;
@@ -281,7 +295,15 @@ export class AnthropicAdapter implements LLMClientActor {
         toolCalls.length ? ` calls=${JSON.stringify(toolCalls).slice(0, 400)}` : ""
       }`
     );
-    return { text, toolCalls, rawToolCallsStr };
+    const usage = mergeUsage(
+      undefined,
+      {
+        promptTokens: estimatePromptTokens(messages),
+        completionTokens: estimateCompletionTokens(text),
+        totalTokens: undefined,
+      }
+    );
+    return { text, toolCalls, rawToolCallsStr, usage };
   }
 
   private toAnthropicMessages(messages: ChatMessage[]): { system: string[]; anthropicMessages: any[] } {

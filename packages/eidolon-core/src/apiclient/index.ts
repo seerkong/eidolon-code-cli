@@ -1,11 +1,11 @@
 import type {
+  AgentRunnerOuterCtrl,
   AiClientApiKind,
   ChatMessage,
   LLMClientActor,
   LLMResponse,
   Logger,
   ModelProfile,
-  StreamCallbacks,
   ToolDefinition,
 } from "../index";
 import { AnthropicAdapter } from "./anthropic";
@@ -27,5 +27,5 @@ export type AdapterDeps = {
 export type AdapterResponder = (
   messages: ChatMessage[],
   tools: ToolDefinition[],
-  callbacks?: StreamCallbacks
+  callbacks?: AgentRunnerOuterCtrl
 ) => Promise<LLMResponse>;

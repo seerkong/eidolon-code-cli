@@ -68,7 +68,7 @@ async function walkMarkdownCommands(root: string, source: "project" | "user"): P
 
 export async function discoverSlashCommands(workspace: string): Promise<FileCommand[]> {
   const projectRoot = path.join(workspace, ".eidolon");
-  const userRoot = path.join(os.homedir(), ".eidolon", "extension");
+  const userRoot = path.join(os.homedir(), ".eidolon", "commands");
   const results = await Promise.all([
     walkMarkdownCommands(userRoot, "user"),
     walkMarkdownCommands(projectRoot, "project"),
@@ -97,24 +97,20 @@ function mergeCommands(base: SlashCommand[], additions: SlashCommand[]): SlashCo
 
 export async function loadSlashCommandLists(workspace: string): Promise<SlashCommandLists> {
   const discovered = await discoverSlashCommands(workspace);
-  const asExecute = discovered
-    .filter((cmd) => cmd.mode === "execute")
-    .map<SlashCommand>((cmd) => ({
-      name: cmd.name,
-      description: `${cmd.source} command`,
-      filePath: cmd.filePath,
-      mode: "execute",
-      source: cmd.source,
-    }));
-  const asInsert = discovered
-    .filter((cmd) => cmd.mode === "insert")
-    .map<SlashCommand>((cmd) => ({
-      name: cmd.name,
-      description: `${cmd.source} command`,
-      filePath: cmd.filePath,
-      mode: "insert",
-      source: cmd.source,
-    }));
+  const asExecute = discovered.map<SlashCommand>((cmd) => ({
+    name: cmd.name,
+    description: `${cmd.source} command`,
+    filePath: cmd.filePath,
+    mode: "execute",
+    source: cmd.source,
+  }));
+  const asInsert = discovered.map<SlashCommand>((cmd) => ({
+    name: cmd.name,
+    description: `${cmd.source} command`,
+    filePath: cmd.filePath,
+    mode: "insert",
+    source: cmd.source,
+  }));
 
   return {
     execute: mergeCommands(BUILTIN_EXECUTE, asExecute),

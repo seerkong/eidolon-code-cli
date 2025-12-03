@@ -44,11 +44,13 @@ The system SHALL expose `eidolon-fs-api` interfaces for workspace-rooted file an
 - **THEN** the system prompt/reminders instruct it to create/update todos via the `todo_write` tool, and hidden reminders are injected (initial + periodic) to keep multi-step work tracked.
 
 ### Requirement: CLI interaction loop
-The CLI interaction loop SHALL retain the readline-based prompt while adding `@agent:` completion and system prompt injection, preserving streaming, tool rendering, and logging behaviors.
+The CLI SHALL use an OpenTUI-based chat surface (history pane + multi-line prompt + overlays) instead of the readline/stdout loop, while keeping streaming/tool rendering and logging behaviors intact.
 
-#### Scenario: Readline loop with agent trigger
-- **WHEN** the CLI prompt is used with `@agent:` tokens
-- **THEN** the readline loop remains usable (no hangs), streaming output works, and agent selection does not regress `@file:` or `@!` behaviors.
+#### Scenario: OpenTUI chat surface handles streaming
+- **WHEN** the CLI launches and a user submits a prompt or slash command
+- **THEN** an OpenTUI layout renders a scrollable history pane and editable multi-line prompt
+- **AND** streamed assistant tokens and tool call/results appear live in the history pane without freezing the prompt
+- **AND** output avoids the legacy plain `user/assistant/toolcall` stdout format, using the TUI widgets instead.
 
 ### Requirement: Model configuration and default adapter
 The system SHALL load configuration from `~/.eidolon` (with optional project overrides), select the active model profile (defaulting to a legacy single profile when `models` is absent), and route requests through the adapter matching the profile’s API kind.
@@ -104,27 +106,18 @@ The CLI SHALL use a compile-friendly prompt loop (readline-based) and support tr
 ### Requirement: Path completion for @file
 The CLI SHALL provide path completion assistance for `@file:` entries.
 
-#### Scenario: Autocomplete path suggestions
-- **WHEN** the user starts typing `@file:` followed by a partial path
-- **THEN** file/directory options from the relevant directory are suggested (using terminal-kit autocomplete or a documented fallback)
-- **AND** selection inserts the chosen path into the prompt.
-
-#### Scenario: Completion time limit
-- **WHEN** the CLI attempts to list candidates for `@file:` completion
-- **THEN** the lookup and suggestion process SHALL not block the prompt for more than 2 seconds
-- **AND** if results are not ready within 2 seconds, the completion is aborted gracefully (no crash) and the prompt remains usable.
+#### Scenario: OpenTUI file completion and picker
+- **WHEN** the user types `@file:` (with or without a partial path) or invokes the file picker shortcut
+- **THEN** an OpenTUI overlay shows workspace-safe file/directory suggestions (and a picker for browsing)
+- **AND** Tab/arrow selection inserts the chosen `@file:` token into the prompt without blocking for more than 2 seconds; if listing exceeds 2 seconds, the overlay closes gracefully and the prompt stays usable.
 
 ### Requirement: Agent trigger and completion
 The CLI SHALL support an `@agent:` trigger that surfaces custom agents from user and project directories with completion.
 
-#### Scenario: Agent completion from user/project directories
-- **WHEN** the user types `@agent:` and presses Tab without a prefix
-- **THEN** agents from `~/.eidolon/agents/` and `<workspace>/.eidolon/agents/` are listed (project overrides user on name collisions)
-- **AND** selecting a name inserts it into the prompt.
-
-#### Scenario: Agent completion with prefix
-- **WHEN** the user types `@agent:foo` and presses Tab
-- **THEN** only agents whose names start with `foo` are suggested, and selection replaces the nearest `@agent:` token.
+#### Scenario: OpenTUI agent completion parity with @file
+- **WHEN** the user types `@agent:` (optionally with a prefix) and presses Tab or navigates completion
+- **THEN** an OpenTUI overlay suggests agent names from `~/.eidolon/agents/` and `<workspace>/.eidolon/agents/` (project overrides user on name collisions)
+- **AND** selecting a suggestion replaces the nearest `@agent:` token in the prompt, matching the `@file:` completion UX.
 
 ### Requirement: Agent loading and application
 The system SHALL load agent definitions (markdown + frontmatter) from the user and project agent directories and apply the chosen agent’s system prompt to subsequent turns.
@@ -181,4 +174,46 @@ The CLI SHALL discover project-local slash commands from `.eidolon/commands/**/*
 #### Scenario: Command execution
 - **WHEN** the user selects a discovered slash command
 - **THEN** the CLI loads and runs the markdown command content using the established slash-command execution flow, and surfaces the result to the user.
+
+#### Scenario: Insert command submission
+- **WHEN** a user accepts an insert-mode slash command
+- **THEN** the command token is inserted with a trailing space, the user can keep typing or add `@file:` (including via Ctrl+F insertion), and the input is not reset
+- **AND** pressing Enter while no completions/dialogs are active submits the combined input, treating the leading insert command as a slash command whose prompt content is injected into `extraSystems` for the model.
+
+### Requirement: Slash command palette
+The CLI SHALL expose a slash-command palette inside the OpenTUI prompt.
+
+#### Scenario: Slash menu selection and execution
+- **WHEN** the input begins with `/` (with or without a prefix)
+- **THEN** an OpenTUI palette lists matching commands discovered under `<workspace>/.eidolon/**\/*.md`
+- **AND** arrow/Tab selection inserts the command token (or runs it with loaded content and extra text) while keeping the prompt responsive.
+
+#### Scenario: Slash commands have execute vs insert buckets
+- **WHEN** the slash palette opens
+- **THEN** it shows two categories of commands: immediate-execute and insert-into-input
+- **AND** each category is built from static system commands plus commands discovered under project and user `.eidolon` folders (project overrides on name collisions)
+- **AND** selecting an execute command runs it; selecting an insert command places the token into the prompt without blocking streaming or input.
+
+### Requirement: File picker shortcut
+The CLI SHALL provide a keyboard-accessible file picker that inserts `@file:` references.
+
+#### Scenario: Picker inserts workspace path
+- **WHEN** the user opens the picker from the TUI
+- **THEN** a modal list of workspace files/directories appears, selection inserts an `@file:<path>` token into the prompt, and closing the picker returns focus to the prompt without disrupting streaming or history.
+
+### Requirement: Token usage visibility
+The CLI SHALL expose per-turn token usage and session-level utilization against the configured model limits for both OpenAI- and Anthropic-style adapters.
+
+#### Scenario: Per-turn usage for OpenAI/Anthropic
+- **WHEN** a turn completes using an `apiKind` of `openai` or `anthropic`
+- **THEN** the CLI retrieves prompt/completion token usage from the adapter response (or best-effort equivalent) and surfaces the turn’s totals to the user (e.g., info line or status).
+
+#### Scenario: Session utilization status
+- **WHEN** a session has accumulated history
+- **THEN** the CLI tracks total tokens consumed across turns and computes utilization versus the active profile’s `maxInputChars`
+- **AND** the status ticker displays the current utilization percentage so the user can see how close they are to the input limit.
+
+#### Scenario: Session persistence of token stats
+- **WHEN** a session continues across multiple turns
+- **THEN** token usage stats are persisted with session data so utilization remains accurate after subsequent turns without requiring recomputation from scratch.
 

@@ -36,6 +36,7 @@ export class FileStoreActorImpl implements FileStoreActor {
       historyParsedFile: path.join(stateDir, "history_parsed_chat.xnl"),
       historyCliFile: path.join(stateDir, "history_cli.xnl"),
       todoFile: path.join(stateDir, "todos.json"),
+      tokenFile: path.join(stateDir, "tokens.json"),
     };
   }
 
@@ -50,6 +51,10 @@ export class FileStoreActorImpl implements FileStoreActor {
       if (todos?.items) {
         innerCtx.todoBoard.load(todos.items as TodoItemInput[]);
       }
+      const tokens = await this.loadTokenStats();
+      if (tokens) {
+        innerCtx.tokenStats = tokens;
+      }
     } catch (error) {
       console.warn("Failed to restore state", error);
     }
@@ -59,6 +64,7 @@ export class FileStoreActorImpl implements FileStoreActor {
     await ensureSessionDir(this.paths);
     await this.saveHistory(innerCtx.history);
     await this.saveTodos(innerCtx.todoBoard.snapshot());
+    await this.saveTokenStats(innerCtx.tokenStats);
   }
 
   getLogPaths() : LogPaths {
@@ -100,13 +106,30 @@ export class FileStoreActorImpl implements FileStoreActor {
     await fs.writeFile(this.paths.todoFile, JSON.stringify(data, null, 2), "utf-8");
   }
 
+  async loadTokenStats(): Promise<any | undefined> {
+    try {
+      const raw = await fs.readFile(this.paths.tokenFile, "utf-8");
+      return JSON.parse(raw);
+    } catch (error: any) {
+      if (error?.code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
+  async saveTokenStats(data: any): Promise<void> {
+    await ensureSessionDir(this.paths);
+    await fs.writeFile(this.paths.tokenFile, JSON.stringify(data ?? {}, null, 2), "utf-8");
+  }
+
   async appendActual(messages: ChatMessage[]): Promise<void> {
+    await ensureSessionDir(this.paths);
     const serialized = messages.map((m) => chatMessageToXnl(m)).map((n) => XNL.stringify(n, { pretty: true, indent: 2 })).join("\n");
     await fs.appendFile(this.paths.historyActualFile, `${serialized}\n`, "utf-8");
   }
 
   async appendParsed(messages: ChatMessage[]): Promise<void> {
     if (!messages.length) return;
+    await ensureSessionDir(this.paths);
     const serialized = messages.map((m) => chatMessageToXnl(m)).map((n) => XNL.stringify(n, { pretty: true, indent: 2 })).join("\n");
     await fs.appendFile(this.paths.historyParsedFile, `${serialized}\n`, "utf-8");
   }
@@ -114,6 +137,7 @@ export class FileStoreActorImpl implements FileStoreActor {
   async appendCli(messages: CliHistoryEntry[]): Promise<void> {
     if (!messages.length) return;
 
+    await ensureSessionDir(this.paths);
     const serialized = messages.map((m) => cliMessageToXnl(m)).map((n) => XNL.stringify(n, { pretty: true, indent: 2 })).join("\n");
     await fs.appendFile(this.paths.historyCliFile, `${serialized}\n`, "utf-8");
   }

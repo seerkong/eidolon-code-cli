@@ -1,3 +1,4 @@
+import { AgentRunnerOuterCtrl } from '../EidolonCoreRuntime';
 import {
     ToolDefinition
 } from '../LLMTool';
@@ -8,6 +9,7 @@ export type Role = "user" | "assistant" | "tool" | "system";
 export interface ChatMessage {
   role: Role;
   name?: string;
+  reasoning_content?: string;
   content: string;
   toolCallId?: string;
   toolCalls?: ToolCall[];
@@ -22,21 +24,19 @@ export interface ToolCall {
 }
 
 export interface LLMResponse {
+  reasoning_content?: string;
   text?: string;
   toolCalls?: ToolCall[];
   rawToolCallsStr?: string;
+  usage?: TokenUsage;
 }
 
-export interface StreamCallbacks {
-  onToken?: (msgId: string, chunk: string) => void;
-  onDone?: () => void;
-  
-  onStart?: (call: CliHistoryEntry) => Promise<void>;
-  onResult?: (result: CliHistoryEntry) => Promise<void>;
-}
-
+export type TokenUsage = {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+};
 
 export interface LLMClientActor {
-  respond(messages: ChatMessage[], tools: ToolDefinition[], callbacks?: StreamCallbacks): Promise<LLMResponse>;
+  respond(messages: ChatMessage[], tools: ToolDefinition[], callbacks?: AgentRunnerOuterCtrl): Promise<LLMResponse>;
 }
-

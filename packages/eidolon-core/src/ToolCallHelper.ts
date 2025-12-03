@@ -1,4 +1,5 @@
 import { XNL, ElementNodeKind, DataElementNode, TextElementNode } from "xnl.ts";
+import { Logger } from "./contract";
 
 export interface ParsedXnlToolCall {
   id: string;
@@ -10,10 +11,13 @@ export interface ParsedXnlToolCall {
 // 按照出现顺序返回解析后的 ParsedXnlToolCall
 // 如果id重复，则使用后面的。
 // 如果没有id，则忽略
-export function parseXnlToolCalls(text: string): ParsedXnlToolCall[] {
+export function parseXnlToolCalls(text: string, logger?: Logger): ParsedXnlToolCall[] {
     let contents = parseUnquoteContents(text);
     let idToResultMap: { [id: string]: ParsedXnlToolCall } = {};
     let idOrder: string[] = [];
+    if (logger != null) {
+      logger(`[parseXnlToolCalls] ${JSON.stringify(contents)}`)
+    }
 
     for (let i = 0; i < contents.length; i++) {
         const { nodes } = XNL.parseMany(contents[i]);

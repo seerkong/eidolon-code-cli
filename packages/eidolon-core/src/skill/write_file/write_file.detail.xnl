@@ -8,7 +8,7 @@ export interface WriteFileOuterInput {
 export type WriteFileOuterOutput = string;
 export type write_file = (input: WriteFileOuterInput) => WriteFileOuterOutput;
 
-<#>
+</#>
 
 <demo #good_usage_demo1>
 !unquote_start
@@ -18,6 +18,6 @@ SysBuiltIn.write_file({
     content: "hello world\n",
     mode: "append"
 })
-<#>
+</#>
 !unquote_end
-<#good_usage_demo1>
+</#good_usage_demo1>

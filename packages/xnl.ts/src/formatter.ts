@@ -37,7 +37,7 @@ function serializeNode(node: XnlNode, state: StringifyState): string {
       const metaStr = serializeInlineAttributes(node.metadata, state);
       const attrStr = node.attributes ? ` ${serializeAttributeBlock(node.attributes, state)}` : "";
       const marker = node.textMarker ?? "";
-      return `${pad}<${node.tag}${metaStr}${attrStr} #${marker}>${node.text ?? ""}<#${marker}>`;
+      return `${pad}<${node.tag}${metaStr}${attrStr} #${marker}>${node.text ?? ""}</#${marker}>`;
     }
     const metaStr = serializeInlineAttributes(node.metadata, state);
     const attrPart = node.attributes ? ` ${serializeAttributeBlock(node.attributes, state)}` : "";

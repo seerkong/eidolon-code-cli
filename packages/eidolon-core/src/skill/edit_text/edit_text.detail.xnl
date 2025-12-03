@@ -12,7 +12,7 @@ export interface EditTextOuterInput {
 export type EditTextOuterOutput = string;
 export type edit_text = (input: EditTextOuterInput) => EditTextOuterOutput;
 
-<#>
+</#>
 
 <demo #good_usage_demo1>
 !unquote_start
@@ -23,6 +23,6 @@ SysBuiltIn.edit_text({
     insertAfter: 5,
     newText: "Added a new note.\n"
 })
-<#>
+</#>
 !unquote_end
-<#good_usage_demo1>
+</#good_usage_demo1>

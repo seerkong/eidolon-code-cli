@@ -1,16 +1,17 @@
 import crypto from "crypto";
 import {
+  AgentRunnerOuterCtrl,
   ulid,
   type ChatMessage,
   type LLMClientActor,
   type LLMResponse,
   type Logger,
   type ModelProfile,
-  type StreamCallbacks,
   type ToolCall,
   type ToolDefinition,
   type ToolName,
 } from "../index";
+import { estimateCompletionTokens, estimatePromptTokens, mergeUsage } from "./usage";
 
 export class OpenAIAdapter implements LLMClientActor {
   private profile: ModelProfile;
@@ -30,7 +31,7 @@ export class OpenAIAdapter implements LLMClientActor {
     }
   }
 
-  async respond(messages: ChatMessage[], _tools: ToolDefinition[], callbacks?: StreamCallbacks): Promise<LLMResponse> {
+  async respond(messages: ChatMessage[], _tools: ToolDefinition[], callbacks?: AgentRunnerOuterCtrl): Promise<LLMResponse> {
     if (!this.profile.apiKey) {
       return { text: "No API key provided", toolCalls: [] };
     }
@@ -40,7 +41,8 @@ export class OpenAIAdapter implements LLMClientActor {
     );
 
     const body = {
-      model: this.profile.model || "gpt-3.5-turbo",
+      model: this.profile.model || '',
+      // extra_body: { "thinking": { "type": "enabled" } },
       messages: messages.map((m) => {
         const base: any = { role: m.role, content: m.content ?? "" };
         if (m.role === "assistant" && m.toolCalls?.length) {
@@ -86,12 +88,13 @@ export class OpenAIAdapter implements LLMClientActor {
     }
 
     if (body.stream && res.body) {
-      return this.handleStream(res, callbacks);
+      return this.handleStream(res, callbacks, messages);
     }
 
     const data: any = await res.json();
     const choice = data?.choices?.[0]?.message ?? {};
     this.log(`openai adapter ok status=${res.status} tool_calls=${(choice?.tool_calls || []).length || 0}`);
+    const reasoning_content = choice?.reasoning_content ?? '';
     const text = Array.isArray(choice?.content)
       ? choice.content.map((c: any) => (typeof c === "string" ? c : c?.text ?? "")).join("\n")
       : choice?.content ?? "";
@@ -101,7 +104,7 @@ export class OpenAIAdapter implements LLMClientActor {
       const args =
         typeof call?.function?.arguments === "string" ? safeParseJson(call.function.arguments) : call?.function?.arguments;
       return {
-        id: call?.id ?? crypto.randomUUID(),
+        id: call?.id ?? ulid(),
         name: call?.function?.name as ToolName,
         input: args && typeof args === "object" ? args : { __raw: call?.function?.arguments },
       };
@@ -120,13 +123,33 @@ export class OpenAIAdapter implements LLMClientActor {
             2
           );
 
-    return { text, toolCalls, rawToolCallsStr };
+    const usage = mergeUsage(
+      data?.usage
+        ? {
+            promptTokens: data.usage.prompt_tokens,
+            completionTokens: data.usage.completion_tokens,
+            totalTokens: data.usage.total_tokens,
+          }
+        : undefined,
+      {
+        promptTokens: estimatePromptTokens(messages),
+        completionTokens: estimateCompletionTokens(text),
+        totalTokens: undefined,
+      }
+    );
+
+    return { reasoning_content, text, toolCalls, rawToolCallsStr, usage };
   }
 
-  private async handleStream(res: Response, callbacks?: StreamCallbacks): Promise<LLMResponse> {
+  private async handleStream(
+    res: Response,
+    callbacks: AgentRunnerOuterCtrl | undefined,
+    messages: ChatMessage[]
+  ): Promise<LLMResponse> {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let reasoning_content = "";
     let text = "";
     const toolCalls: Record<string, { name?: string; argsText?: string; argsObj?: any }> = {};
     const indexToId: Record<number, string> = {};
@@ -170,13 +193,21 @@ export class OpenAIAdapter implements LLMClientActor {
         return;
       }
       const delta = parsed?.choices?.[0]?.delta ?? {};
+      if (delta.reasoning_content) {
+        gotStreamData = true;
+        const chunk = Array.isArray(delta.reasoning_content)
+          ? delta.reasoning_content.map((c: any) => (typeof c === "string" ? c : c?.text ?? "")).join("")
+          : delta.reasoning_content;
+        reasoning_content += chunk;
+        callbacks?.onChunk?.(msgId, chunk);
+      }
       if (delta.content) {
         gotStreamData = true;
         const chunk = Array.isArray(delta.content)
           ? delta.content.map((c: any) => (typeof c === "string" ? c : c?.text ?? "")).join("")
           : delta.content;
         text += chunk;
-        callbacks?.onToken?.(msgId, chunk);
+        callbacks?.onChunk?.(msgId, chunk);
       }
       const toolDelta = delta.tool_calls || (delta.function_call ? [delta.function_call] : undefined);
       if (Array.isArray(toolDelta)) {
@@ -255,7 +286,15 @@ export class OpenAIAdapter implements LLMClientActor {
         tcArray.length ? ` calls=${JSON.stringify(tcArray).slice(0, 400)}` : ""
       }`
     );
-    return { text, toolCalls: tcArray, rawToolCallsStr };
+    const usage = mergeUsage(
+      undefined,
+      {
+        promptTokens: estimatePromptTokens(messages),
+        completionTokens: estimateCompletionTokens(text),
+        totalTokens: undefined,
+      }
+    );
+    return { reasoning_content, text, toolCalls: tcArray, rawToolCallsStr, usage };
   }
 }
 

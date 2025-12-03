@@ -11,7 +11,7 @@ export interface TodoWriteOuterInput {
 export type TodoWriteOuterOutput = string;
 export type todo_write = (input: TodoWriteOuterInput) => TodoWriteOuterOutput;
 
-<#>
+</#>
 
 <demo #good_usage_demo1>
 !unquote_start
@@ -21,6 +21,6 @@ SysBuiltIn.todo_write({
         { id: "1", content: "Add README", status: "in_progress", activeForm: "cli" }
     ]
 })
-<#>
+</#>
 !unquote_end
-<#good_usage_demo1>
+</#good_usage_demo1>

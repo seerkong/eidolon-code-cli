@@ -1,0 +1,1 @@
+<flow id="flow1" {status="done"} [ <step id="s1" {label="old"}> <step id="s2" {label="new"}> ]>

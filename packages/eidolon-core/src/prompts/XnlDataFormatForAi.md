@@ -8,7 +8,7 @@ XNL（Extensible Notation Language）
 - 属性块：`{ key = value ... }` → 存入 `attributes`。
 - 数组块：`[ item1 item2 <child> ]` → 存入 `body`（元素可为值或子节点）。
 - 唯一子节点块（extend）：`( <child1> <child2> )` → 存入 `extend`，同名覆盖旧值并警告，保持出现顺序。
-- 文本块：`<name metadata {attr} #marker?> ... <#marker?>`，允许 metadata/`{}`，禁止 `[]`/`()`；标记可选但必须首尾一致。
+- 文本块：`<name metadata {attr} #marker?> ... </#marker?>`，允许 metadata/`{}`，禁止 `[]`/`()`；标记可选但必须首尾一致。
 - 无其它块时直接以 `>` 结束节点。
 
 ## 字面量与节点
@@ -23,7 +23,7 @@ XNL（Extensible Notation Language）
 - extend 块必须全是子节点；同名覆盖旧值并产生 `DUPLICATE_CHILD` 警告。
 - 对象/数组/属性值可混合值与标签；当需要唯一子节点语义仍应使用 `()`。
 - 注释 `<!-- ... -->` 可出现在节点间、块内、文本块中；解析时跳过（文本块会移除注释内容）。
-- 多行文本去缩进：去掉首行空行，然后按结束 `<#...>` 行左侧缩进去除前缀（空格/Tab）。
+- 多行文本去缩进：去掉首行空行，然后按结束 `</#...>` 行左侧缩进去除前缀（空格/Tab）。
 
 ## EBNF 摘要
 ```ebnf
@@ -31,7 +31,7 @@ Document    = S? Node* ;
 Node        = TextNode | Element | VoidNode ;
 Element     = "<" Name Metadata? Sections ">" ;
 VoidNode    = "<" Name Metadata? ">" ;
-TextNode    = "<" Name Metadata? AttributeBlock? "#" TextMarker? ">" TextContent "<#" TextMarker? ">" ;
+TextNode    = "<" Name Metadata? AttributeBlock? "#" TextMarker? ">" TextContent "</#" TextMarker? ">" ;
 
 Metadata    = (S Attribute)* ;
 Attribute   = Key S? "=" S? ValueLiteral ;
@@ -174,16 +174,16 @@ export type XnlNode = ValueLiteral | ContainerNode | CommentNode;
     在纯文本内部，无需转义，例如 & < > #
     可以包含形如 <notatag 的内容，均按文本处理
     多行文本会按结束标签所在行的缩进去除前缀
-  <#>
+  </#>
   <text2 a=1 {b="cc"} #flag_1234>
-    如果文本中包含 `<#>` 字样，可在开始标签后加标记，如 `#flag_1234`
+    如果文本中包含 `</#>` 字样，可在开始标签后加标记，如 `#flag_1234`
     结束标签必须使用相同标记 `#flag_1234`
-  <#flag_1234>
+  </#flag_1234>
 ]>
 ```
 
 ## 生成检查清单
-- 文本块用 `<name ... #marker?> ... <#marker?>`，不与 `[]`/`()` 同用；metadata 与 `{}` 可放在 `#` 前。
+- 文本块用 `<name ... #marker?> ... </#marker?>`，不与 `[]`/`()` 同用；metadata 与 `{}` 可放在 `#` 前。
 - extend 块只写子节点，同名覆盖并警告；需要多个同名请改用数组块。
 - 键名若含空格/特殊字符请加引号；字符串可用单/双引号。
 - 注释可写，但会被忽略；文本内注释也会被移除。
@@ -214,20 +214,46 @@ export type XnlNode = ValueLiteral | ContainerNode | CommentNode;
 ```
 
 ### 文本节点使用了xml的结束标签规则
-#### ❌ 错误示例
+#### ❌ 错误示例1
 
 ```xnl
 <div id="" #>
-</div> ❌ 错误！文本标签的结束，如果没有自定义marker，应当用`<#>`，不是 `</div>`
+</div> ❌ 错误！文本标签的结束，如果没有自定义marker，应当用`</#>`，不是 `</div>`
+```
+
+#### ❌ 错误示例2
+
+```xnl
+<div id="" #>
+</#>
+</div> ❌ 错误! 前面已经通过</#> ，闭合了标签，不能再添加类似xml的结束标签
 ```
 
 #### ✅ 正确示例
 
 ```xnl
 <div id="" #>
-<#>
+</#>
 ```
 
+### 文本节点缺少#
+#### ❌ 错误示例
+```xnl
+<tool_call id="read_agents_doc" lang="javascript> ❌ 错误! 文本元素节点，开始标签，应该用 #> 结尾
+SysBuiltin.read_file({
+  path: "AGENTS.md"
+})
+</#>
+```
+
+#### ✅ 正确示例
+```xnl
+<tool_call id="read_agents_doc" lang="javascript #> ✅ 文本元素节点，开始标签，使用了 #> 结尾
+SysBuiltin.read_file({
+  path: "AGENTS.md"
+})
+</#>
+```
 
 ### 文本节点自定义的marker不匹配
 #### ❌ 错误示例
@@ -235,8 +261,8 @@ export type XnlNode = ValueLiteral | ContainerNode | CommentNode;
 ```xnl
 <my_text id="" #ttt>
   content
-<#qqq> 
-❌ 错误！文本标签的结束，如果有marker，应当与开始节点一致`<#ttt>`，不能是marker，例如本例中错误的 `<#qqq> `
+</#qqq> 
+❌ 错误！文本标签的结束，如果有marker，应当与开始节点一致`</#ttt>`，不能是marker，例如本例中错误的 `</#qqq> `
 ```
 
 #### ✅ 正确示例
@@ -244,5 +270,5 @@ export type XnlNode = ValueLiteral | ContainerNode | CommentNode;
 ```xnl
 <my_text id="" #ttt>
   content
-<#ttt> 
+</#ttt> 
 ```

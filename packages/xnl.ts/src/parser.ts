@@ -209,21 +209,29 @@ function parseTextBody(state: ParseState, name: string): { text: string; textMar
   const start = state.pos;
 
   while (true) {
-    const idx = state.input.indexOf("<#", state.pos);
+    const idx = state.input.indexOf("</#", state.pos);
     if (idx === -1) {
-      throw error(state, "MISMATCHED_TAG", `Missing closing text tag <#${marker ?? ""}> for <${name}>`);
+      throw error(state, "MISMATCHED_TAG", `Missing closing text tag </#${marker ?? ""}> for <${name}>`);
     }
-    const markerStart = idx + 2;
+    const markerStart = idx + 3;
     let i = markerStart;
     while (i < state.length && isIdentifierChar(state.input[i])) i++;
     const foundMarker = state.input.slice(markerStart, i);
     if (state.input[i] !== ">") {
       state.pos = idx;
-      throw error(state, "UNEXPECTED_TOKEN", `Invalid closing text tag for <${name}>; expected '>' after marker '${foundMarker}'`);
+      throw error(
+        state,
+        "UNEXPECTED_TOKEN",
+        `Invalid closing text tag for <${name}>; expected '>' after marker '${foundMarker}'`
+      );
     }
     if ((marker ?? "") !== foundMarker) {
       state.pos = idx;
-      throw error(state, "MISMATCHED_TAG", `Mismatched text marker for <${name}>: expected '${marker ?? ""}' but found '${foundMarker}'`);
+      throw error(
+        state,
+        "MISMATCHED_TAG",
+        `Mismatched text marker for <${name}>: expected '${marker ?? ""}' but found '${foundMarker}'`
+      );
     }
     const closingIndent = indentationBefore(state.input, idx);
     const content = stripComments(dedentContent(state.input.slice(start, idx), closingIndent));
@@ -375,7 +383,7 @@ function parseNullLiteral(state: ParseState): null {
 
 function parseIdentifierStringLiteral(state: ParseState): string {
   const id = readIdentifier(state, "Expected identifier literal");
-  return id;
+  throw error(state, "INVALID_LITERAL", `Bare identifier '${id}' is not allowed; use quoted string`);
 }
 
 function readOptionalMarker(state: ParseState): string | undefined {

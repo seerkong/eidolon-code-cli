@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import fsSync from "fs";
-import { promises as fs } from "fs";
+import { appendFile, mkdir, readdir } from "fs/promises";
 import os from "os";
 import path from "path";
 import vm from "vm";
@@ -15,12 +15,13 @@ import {
   ToolResult,
   ToolDefinition,
   CliHistoryEntry,
-  truncateLines
+  truncateLines,
+  AgentRunnerOuterCtrl,
+  TokenUsage,
 } from "./contract";
 
-import { LogPaths } from './contract/actor/FileStoreActor.ts'
+import { ProjectStatePaths } from './contract/actor/FileStoreActor.ts'
 import {
-  StreamCallbacks,
   ToolCall,
 } from './contract/actor/LLMClientActor.ts'
 export * from './contract';
@@ -45,6 +46,8 @@ export interface AgentTurnResult {
   toolResults: ToolResult[];
   messages: ChatMessage[];
   todos: TodoSnapshot;
+  usage?: TokenUsage;
+  tokenStats?: TokenUsage;
 }
 
 const DEFAULT_MAX_ITERATIONS = 10;
@@ -62,11 +65,18 @@ export class AgentRunner {
     this.injectBootstrapPrompts();
   }
 
-  async kick(userText: string, callbacks?: StreamCallbacks, extraSystem?: string[]): Promise<AgentTurnResult> {
+  async kick(userText: string, callbacks?: AgentRunnerOuterCtrl, extraSystem?: string[]): Promise<AgentTurnResult> {
     if (!this.runtime.innerCtrl.sessionLoaded) {
       await this.runtime.actors.fileStore.restoreSession(this.runtime.innerCtx);
       this.runtime.innerCtrl.sessionLoaded = true;
     }
+    if (callbacks) {
+      this.runtime.outerCtrl = callbacks;
+    } else {
+      this.runtime.outerCtrl = {}
+    }
+    let appLogger = await createCoreLogger(this.runtime.actors.fileStore.paths);
+    this.runtime.outerCtrl.appLogger = appLogger;
 
     if (extraSystem?.length) {
       this.logLine(`extra_system count=${extraSystem.length}`);
@@ -74,13 +84,6 @@ export class AgentRunner {
         await this.recordMessage({ role: "system", content: sys });
       }
     }
-    // dirty code
-    this.runtime.outerCtrl.toolCallbacks = {
-      onStart: callbacks?.onStart,
-      onResult: callbacks?.onResult,
-    }
-
-
 
     this.injectTodoReminder();
     await this.recordMessage({ role: "user", content: userText });
@@ -93,9 +96,9 @@ export class AgentRunner {
       let streamedText = "";
       const wrappedCallbacks = callbacks
         ? {
-            onToken: (msgId: string, chunk: string) => {
+            onChunk: (msgId: string, chunk: string) => {
               streamedText += chunk ?? "";
-              callbacks.onToken?.(msgId, chunk);
+              callbacks.onChunk?.(msgId, chunk);
             },
             onDone: () => callbacks.onDone?.(),
           }
@@ -104,8 +107,9 @@ export class AgentRunner {
       const assistantText = streamedText || response.text || "";
       assistantChunks.push(assistantText);
       lastAssistantText = assistantText;
+      this.applyUsage(response.usage, assistantText);
 
-      const parsedCallsRaw: ParsedXnlToolCall[] = parseXnlToolCalls(assistantText);
+      const parsedCallsRaw: ParsedXnlToolCall[] = parseXnlToolCalls(assistantText, this.runtime.outerCtrl.appLogger);
       const seenCalls = new Set<string>();
       const parsedCalls = parsedCallsRaw.filter((c) => {
         const key = `${c.id}::${c.code?.trim() ?? ""}`;
@@ -116,7 +120,8 @@ export class AgentRunner {
 
       await this.recordMessage({
         role: "assistant",
-        content: assistantText,
+        reasoning_content: response.reasoning_content || '',
+        content: response.text || '',
         toolCalls: [],
         rawToolCalls: [],
         rawToolCallsStr: parsedCalls.length ? JSON.stringify(parsedCalls, null, 2) : undefined,
@@ -148,8 +153,12 @@ export class AgentRunner {
       toolResults,
       messages: this.runtime.innerCtx.history,
       todos: this.runtime.innerCtx.todoBoard.snapshot(),
+      usage: this.lastUsage,
+      tokenStats: this.runtime.innerCtx.tokenStats,
     };
   }
+
+  private lastUsage: TokenUsage | undefined;
 
   private logLine(line: string) {
     try {
@@ -157,6 +166,27 @@ export class AgentRunner {
     } catch {
       // ignore logger errors
     }
+  }
+
+  private applyUsage(usage: TokenUsage | undefined, completionText: string) {
+    const current = this.runtime.innerCtx.tokenStats || { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+    const completionInc = usage?.completionTokens ?? Math.ceil((completionText?.length || 0) * 0.25);
+    const promptInc = usage?.promptTokens ?? 0;
+    const prompt = (current.promptTokens ?? 0) + promptInc;
+    const completion = (current.completionTokens ?? 0) + completionInc;
+    const totalInc = usage?.totalTokens ?? promptInc + completionInc;
+    const totalBase = current.totalTokens ?? (current.promptTokens ?? 0) + (current.completionTokens ?? 0);
+    const total = totalBase + totalInc;
+    this.runtime.innerCtx.tokenStats = {
+      promptTokens: prompt,
+      completionTokens: completion,
+      totalTokens: total,
+    };
+    this.lastUsage = usage ?? {
+      promptTokens: promptInc,
+      completionTokens: completionInc,
+      totalTokens: totalInc,
+    };
   }
 
   private async recordMessage(message: ChatMessage) {
@@ -244,9 +274,9 @@ export class AgentRunner {
         role: "tool",
         text: call.name + "\n" + truncateChars(JSON.stringify(call.input ?? {}), 140),
       }
-      await this.runtime.outerCtrl.toolCallbacks?.onStart?.(cliHistoryEntry);
+      await this.runtime.outerCtrl?.onStart?.(cliHistoryEntry);
       
-      await this.runtime.outerCtrl.appLogger?.(`tool ${call.name} start input=${JSON.stringify(call.input ?? {})}`);
+      // await this.runtime.outerCtrl.appLogger?.(`tool_call ${call.name} start input=${JSON.stringify(call.input ?? {})}`);
       await this.runtime.actors.fileStore.appendCli([cliHistoryEntry]);
     } catch {
       // ignore callback errors
@@ -260,8 +290,8 @@ export class AgentRunner {
         role: "tool",
         text: result.name + "\n" +  truncateLines(result.output || "(no output)"),
       }
-      await this.runtime.outerCtrl.toolCallbacks?.onResult?.(cliHistoryEntry);
-      await this.runtime.outerCtrl.appLogger?.(`tool ${result.name} error=${Boolean(result.isError)} output=${result.output}`);
+      await this.runtime.outerCtrl?.onResult?.(cliHistoryEntry);
+      // await this.runtime.outerCtrl.appLogger?.(`tool_result ${result.name} error=${Boolean(result.isError)} output=${result.output}`);
       await this.runtime.actors.fileStore.appendCli([cliHistoryEntry]);
     } catch {
       // ignore callback errors
@@ -288,7 +318,22 @@ export class AgentRunner {
 }
 
 
-function truncateChars(arg0: string, arg1: number) {
-  throw new Error("Function not implemented.");
+function truncateChars(text: string, max = 140): string {
+  if (!text) return "";
+  return text.length <= max ? text : `${text.slice(0, max - 3)}...`;
 }
 
+async function createCoreLogger(paths: ProjectStatePaths): Promise<Logger> {
+  const logDir = paths.stateDir;
+  const logFile = path.join(logDir, "core.log");
+  await mkdir(logDir, { recursive: true });
+  const log = async (line: string) => {
+    try {
+      const stamp = new Date().toISOString();
+      await appendFile(logFile, `[${stamp}] ${line}\n`, "utf-8");
+    } catch (error: any) {
+      console.error(`Log write failed: ${error?.message || error}`);
+    }
+  };
+  return log;
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { XNL } from "../src";
-import { ArrayValue, ObjectValue, ValueLiteral, NumericKind, XnlNode } from "../src/types";
+import { XnlNode } from "../src/types";
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonArray | JsonObject;
@@ -11,39 +11,27 @@ interface AiChatRecord extends Record<string, JsonValue> {
   role: string;
 }
 
-function toNumberValue(value: number): ValueLiteral {
-  const numericKind: NumericKind = Number.isInteger(value) ? "Integer" : "Float";
-  return { kind: "Number", value, numericKind, raw: String(value) };
-}
-
-function toValueLiteral(value: JsonValue): ValueLiteral {
-  if (value === null) return { kind: "Null" };
-  if (typeof value === "string") return { kind: "String", value };
-  if (typeof value === "boolean") return { kind: "Boolean", value };
-  if (typeof value === "number") return toNumberValue(value);
-
+function toValueNode(value: JsonValue): XnlNode {
+  if (value === null) return null;
+  if (typeof value !== "object") return value as XnlNode;
   if (Array.isArray(value)) {
-    return {
-      kind: "Array",
-      items: value.map((item) => toValueLiteral(item)),
-    } as ArrayValue;
+    return value.map((item) => toValueNode(item)) as XnlNode;
   }
-
-  const entries: Record<string, ValueLiteral> = {};
+  const obj: Record<string, XnlNode> = {};
   for (const [k, v] of Object.entries(value)) {
-    entries[k] = toValueLiteral(v);
+    obj[k] = toValueNode(v);
   }
-  return { kind: "Object", entries } as ObjectValue;
+  return obj as XnlNode;
 }
 
 function aiChatRecordToNode(record: AiChatRecord): XnlNode {
-  const attrEntries: Record<string, ValueLiteral> = {};
+  const attrEntries: Record<string, XnlNode> = {};
   for (const [key, value] of Object.entries(record)) {
     if (key === "role") continue;
-    attrEntries[key] = toValueLiteral(value);
+    attrEntries[key] = toValueNode(value);
   }
   return {
-    kind: "Element",
+    kind: "DataElement",
     tag: record.role,
     metadata: {},
     attributes: attrEntries,

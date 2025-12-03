@@ -22,9 +22,9 @@ describe("XNL.stringify", () => {
   });
 
   it("serializes text nodes with metadata and attributes", () => {
-    const node = XNL.parseSingle(`<note a=1 {b=2} #>hi<#>`).node;
+    const node = XNL.parseSingle(`<note a=1 {b=2} #>hi</#>`).node;
     const out = XNL.stringify(node);
-    expect(out).toBe(`<note a=1 { b = 2 } #>hi<#>`);
+    expect(out).toBe(`<note a=1 { b = 2 } #>hi</#>`);
   });
 
   it("emits comments when provided in document", () => {

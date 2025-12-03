@@ -9,7 +9,7 @@ export interface ReadFileOuterInput {
 export type ReadFileOuterOutput = string;
 export type read_file = (input: ReadFileOuterInput) => ReadFileOuterOutput;
 
-<#>
+</#>
 
 <demo #good_usage_demo1>
 !unquote_start
@@ -19,6 +19,6 @@ SysBuiltIn.read_file({
     startLine: 1,
     endLine: 40
 })
-<#>
+</#>
 !unquote_end
-<#good_usage_demo1>
+</#good_usage_demo1>
